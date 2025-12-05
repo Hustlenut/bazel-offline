@@ -1,0 +1,2 @@
+# Use only local registry and disable default registries
+# common --registry=file:///home/huy/workspace/bazel/bazel-offline/local_registry

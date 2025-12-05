@@ -1,0 +1,6 @@
+packages
+MODULE.bazel.lock
+build_output/
+downloads.json
+local_registry/
+vendor/

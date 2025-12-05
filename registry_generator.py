@@ -1,127 +1,161 @@
+#!/usr/bin/env python3
 import os
-import re
-import json
 import hashlib
-import argparse
+import json
+from pathlib import Path
 
-not_added = []
+DOWNLOAD_ROOT = Path("cpp_packages")
+REGISTRY_ROOT = Path("local_registry")
+REGISTRY_URL = "file:///home/huy/workspace/bazel/bazel-offline/local_registry"
 
-
-def sha256_of_file(path):
+def sha256_file(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        while chunk := f.read(8192):
+        for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
-    return "sha256-" + h.digest().hex()
+    return h.hexdigest()
 
+def to_module_name(org, repo):
+    # Bazel modules require:
+    # - lowercase
+    # - no slashes
+    return f"{org}_{repo}".lower()
 
-def extract_module_and_version(path, filename):
+def find_packages():
     """
-    Universal filename parser for Bazel registry module generation.
-    Handles:
-    - <module>-<version>.tar.gz
-    - <module>-v<version>.tar.gz
-    - v<version>.tar.gz  (module = parent dir)
-    - <version>.tar.gz   (module = parent dir)
-    - <git-hash>.tar.gz  (module = parent dir)
-    - 2.0-rc1.tar.gz     (module = parent dir)
+    Walk cpp_packages and identify:
+    - module name
+    - version
+    - file path
     """
-
-    # Remove archive extension
-    base = re.sub(r'\.(tar\.gz|zip)$', '', filename)
-
-    # --------------------------
-    # Case 1: module-version
-    # --------------------------
-    m = re.match(r'^(?P<module>.+)-v?(?P<version>[0-9][0-9A-Za-z.\-]*)$', base)
-    if m:
-        module = m.group("module").lower().replace("_", "-")
-        version = m.group("version")
-        return module, version
-
-    # Folder above contains the module name
-    module_from_folder = os.path.basename(os.path.dirname(path)).lower()
-
-    # --------------------------
-    # Case 2: v1.2.3 → version only
-    # --------------------------
-    m = re.match(r'^v(?P<version>[0-9].+)$', base)
-    if m:
-        return module_from_folder, m.group("version")
-
-    # --------------------------
-    # Case 3: pure version number (e.g. Abseil old releases)
-    # --------------------------
-    m = re.match(r'^[0-9][0-9A-Za-z.\-]*$', base)
-    if m:
-        return module_from_folder, base
-
-    # --------------------------
-    # Case 4: git hash (7–40 hex chars)
-    # --------------------------
-    m = re.match(r'^[0-9a-f]{7,40}$', base)
-    if m:
-        return module_from_folder, base
-
-    # --------------------------
-    # Case 5: rc versions (2.0-rc1 etc)
-    # --------------------------
-    m = re.match(r'^(?P<version>[0-9].*rc[0-9]*)$', base)
-    if m:
-        return module_from_folder, m.group("version")
-
-    return None, None
-
-
-def main(download_root, registry_root):
-    for root, dirs, files in os.walk(download_root):
+    results = []
+    for root, dirs, files in os.walk(DOWNLOAD_ROOT):
         for f in files:
-            if not (f.endswith(".tar.gz") or f.endswith(".zip")):
+            full = Path(root) / f
+
+            # Must be an archive
+            if not (f.endswith(".tar.gz") or f.endswith(".tgz") or f.endswith(".zip")):
                 continue
 
-            full_path = os.path.join(root, f)
+            # Expect a structure:
+            # cpp_packages/github.com/ORG/REPO/archive/refs/tags/VERSION/file
+            parts = full.parts
 
-            module, version = extract_module_and_version(full_path, f)
-            if not module:
-                print(f"Skipping unrecognized file name: {f}")
-                not_added.append(os.path.relpath(full_path, download_root))
+            try:
+                pkg_index = parts.index("github.com")
+            except ValueError:
+                # also support sourceware.org, etc.
                 continue
 
-            # Compute integrity
-            integrity = sha256_of_file(full_path)
+            try:
+                org = parts[pkg_index + 1]
+                repo = parts[pkg_index + 2]
+            except IndexError:
+                continue
 
-            # Registry directory
-            mod_dir = os.path.join(registry_root, "modules", module, version)
-            os.makedirs(mod_dir, exist_ok=True)
+            module = to_module_name(org, repo)
 
-            # MODULE.bazel
-            with open(os.path.join(mod_dir, "MODULE.bazel"), "w") as mf:
-                mf.write(f'module(name = "{module}", version = "{version}")\n')
+            # Try to extract version from directory structure
+            version = None
 
-            # source.json
-            url = "file://" + os.path.abspath(full_path)
-            with open(os.path.join(mod_dir, "source.json"), "w") as sf:
-                json.dump({"url": url, "integrity": integrity}, sf, indent=2)
+            # Case 1: archive/refs/tags/<tag>/<file>
+            if "tags" in parts:
+                idx = parts.index("tags")
+                version = parts[idx + 1].replace(".tar.gz", "").replace(".zip", "")
 
-            print(f"Added module {module}@{version}")
+            # Case 2: releases/download/<version>/<file>
+            elif "download" in parts:
+                idx = parts.index("download")
+                version = parts[idx + 1]
 
-    # --------------------------------
-    # Write skipped files to not_added.txt
-    # --------------------------------
-    if not_added:
-        out_file = os.path.join(registry_root, "not_added.txt")
-        with open(out_file, "w") as f:
-            for item in not_added:
-                f.write(item + "\n")
-        print(f"\n⚠️  Wrote list of skipped files to {out_file}")
-    else:
-        print("\n✔ All files successfully added!")
+            if version is None:
+                print("WARN: Could not determine version for", full)
+                continue
+
+            results.append((module, version, full))
+
+    return results
+
+
+def write_metadata(module_dir, module_name):
+    meta = {
+        "homepage": "",
+        "maintainers": [],
+        "versions": sorted(os.listdir(module_dir)),
+    }
+    with open(module_dir / "metadata.json", "w") as f:
+        json.dump(meta, f, indent=2)
+
+
+def write_module_bazel(path, module_name, version):
+    content = f"""module(
+    name = "{module_name}",
+    version = "{version}",
+)
+"""
+    with open(path, "w") as f:
+        f.write(content)
+
+
+def write_source_json(path, file_path):
+    sha = sha256_file(file_path)
+    url = f"file://{file_path.resolve()}"
+
+    source = {
+        "url": url,
+        "integrity": f"sha256-{sha}",
+        "strip_prefix": "",
+    }
+
+    with open(path, "w") as f:
+        json.dump(source, f, indent=2)
+
+
+def write_registry_json():
+    root = {
+        "kind": "BazelRegistry",
+        "version": 1,
+        "repository": REGISTRY_URL,
+    }
+    with open(REGISTRY_ROOT / "registry.json", "w") as f:
+        json.dump(root, f, indent=2)
+
+
+def main():
+    packages = find_packages()
+
+    if REGISTRY_ROOT.exists():
+        print("Cleaning existing registry...")
+        for item in REGISTRY_ROOT.iterdir():
+            if item.is_dir():
+                for sub in item.iterdir():
+                    if sub.is_dir():
+                        for f in sub.rglob("*"):
+                            f.unlink()
+                        sub.rmdir()
+                item.rmdir()
+
+    REGISTRY_ROOT.mkdir(exist_ok=True)
+
+    module_paths = {}
+
+    for module, version, file_path in packages:
+        module_dir = REGISTRY_ROOT / "modules" / module / version
+        module_dir.mkdir(parents=True, exist_ok=True)
+
+        write_module_bazel(module_dir / "MODULE.bazel", module, version)
+        write_source_json(module_dir / "source.json", file_path)
+
+        module_paths.setdefault(module, set()).add(version)
+
+    # Write metadata.json
+    for module, versions in module_paths.items():
+        module_dir = REGISTRY_ROOT / "modules" / module
+        write_metadata(module_dir, module)
+
+    write_registry_json()
+    print("Registry successfully generated at:", REGISTRY_ROOT)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("download_root")
-    parser.add_argument("registry_root")
-    args = parser.parse_args()
-
-    main(args.download_root, args.registry_root)
+    main()

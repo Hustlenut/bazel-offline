@@ -1,64 +1,50 @@
+#!/usr/bin/env python3
+"""
+Generate a top-level MODULE.bazel from a local registry.
+
+Writes MODULE.bazel containing:
+  module(name = "...")
+  bazel_dep(name = "<module>", version = "<chosen-version>")
+
+Logic:
+  - Scans local_registry/modules/<module>/<version>
+  - Picks lexicographically highest version per module by default
+  - Writes MODULE.bazel and MODULE.selected.json (summary)
+"""
 import os
-import argparse
+import json
+from pathlib import Path
 
-def main(registry_root, output_file):
-    modules_dir = os.path.join(registry_root, "modules")
+REG_ROOT = Path("local_registry")
+OUT = Path("MODULE.bazel")
+REG_MODULES = REG_ROOT / "modules"
 
-    all_modules = {}
-    not_added = []
+def pick_version(versions):
+    # lexicographic by default; consider semantic compare if you want
+    return sorted(versions)[-1]
 
-    # Walk registry/modules/<module>/<version>
-    for module_name in os.listdir(modules_dir):
-        module_path = os.path.join(modules_dir, module_name)
-        if not os.path.isdir(module_path):
-            continue
+modules = {}
+if not REG_MODULES.exists():
+    raise SystemExit("local_registry/modules/ not found; run registry_generator.py first")
 
-        versions = [
-            version
-            for version in os.listdir(module_path)
-            if os.path.isdir(os.path.join(module_path, version))
-        ]
+for m in sorted(os.listdir(REG_MODULES)):
+    mpath = REG_MODULES / m
+    if not mpath.is_dir():
+        continue
+    versions = [v for v in os.listdir(mpath) if (mpath / v).is_dir()]
+    if not versions:
+        continue
+    modules[m] = pick_version(versions)
 
-        if versions:
-            all_modules[module_name] = sorted(versions)
-        else:
-            not_added.append(module_name)
+# write MODULE.bazel
+with open(OUT, "w") as fh:
+    fh.write('module(name = "offline_prefetch_workspace")\n\n')
+    for mod, ver in sorted(modules.items()):
+        fh.write(f'bazel_dep(name = "{mod}", version = "{ver}")\n')
 
-    # ---------------------------------------------
-    # Write MODULE.bazel
-    # ---------------------------------------------
-    with open(output_file, "w") as f:
-        f.write('module(name = "offline_prefetch_workspace")\n\n')
+# write a manifest summary
+with open("MODULE.selected.json", "w") as fh:
+    json.dump(modules, fh, indent=2)
 
-        for module_name, versions in sorted(all_modules.items()):
-            for version in versions:
-                f.write(f'bazel_dep(name = "{module_name}", version = "{version}")\n')
-
-    print(f"\n✔ Written MODULE.bazel at: {output_file}")
-
-    # ---------------------------------------------
-    # Print skipped modules
-    # ---------------------------------------------
-    if not_added:
-        print("\n⚠️  The following modules had no valid version directories and were NOT added:")
-        for mod in sorted(not_added):
-            print(f"  - {mod}")
-
-        # Write them to not_added_modules.txt
-        out_file = os.path.join(os.path.dirname(output_file), "not_added_modules.txt")
-        with open(out_file, "w") as f:
-            for mod in sorted(not_added):
-                f.write(mod + "\n")
-
-        print(f"\n⚠️  Written list of skipped modules to: {out_file}\n")
-    else:
-        print("\n✔ All modules successfully added to MODULE.bazel!\n")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("registry_root")
-    parser.add_argument("output_file")
-    args = parser.parse_args()
-
-    main(args.registry_root, args.output_file)
+print(f"Wrote {OUT} with {len(modules)} bazel_dep entries")
+print("Wrote MODULE.selected.json (summary)")
