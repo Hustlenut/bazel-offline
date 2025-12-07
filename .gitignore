@@ -4,3 +4,6 @@ build_output/
 downloads.json
 local_registry/
 vendor/
+.venv
+errors.json
+offline_cache/

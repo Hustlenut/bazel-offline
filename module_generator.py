@@ -20,7 +20,6 @@ OUT = Path("MODULE.bazel")
 REG_MODULES = REG_ROOT / "modules"
 
 def pick_version(versions):
-    # lexicographic by default; consider semantic compare if you want
     return sorted(versions)[-1]
 
 modules = {}

@@ -6,7 +6,7 @@ from pathlib import Path
 
 DOWNLOAD_ROOT = Path("cpp_packages")
 REGISTRY_ROOT = Path("local_registry")
-REGISTRY_URL = "file:///home/huy/workspace/bazel/bazel-offline/local_registry"
+REGISTRY_URL = "file:///home/<path>/local_registry"
 
 def sha256_file(path):
     h = hashlib.sha256()

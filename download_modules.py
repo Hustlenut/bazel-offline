@@ -4,12 +4,10 @@ import subprocess
 import json
 from urllib.parse import quote, urlparse
 
-# --------------------------
 # CONFIG
-# --------------------------
 DOWNLOAD_TIMEOUT = 120
 RETRIES = 3
-GITLAB_PRIVATE_TOKEN = "YOUR_TOKEN_HERE"
+GITLAB_PRIVATE_TOKEN = "TOKEN"
 # --------------------------
 
 errors = []
@@ -41,7 +39,7 @@ def parse_gitlab_release_url(url):
 
 
 def gitlab_get_real_asset_url(host, project_path, tag, filename):
-    # Step 1: get project ID
+    # get project ID
     project_api = f"{host}/api/v4/projects/{quote(project_path, safe='')}"
     out = subprocess.check_output(
         ["curl", "-s", "-H", f"PRIVATE-TOKEN: {GITLAB_PRIVATE_TOKEN}", project_api]
@@ -49,7 +47,7 @@ def gitlab_get_real_asset_url(host, project_path, tag, filename):
     project_info = json.loads(out.decode("utf-8"))
     project_id = project_info["id"]
 
-    # Step 2: release info
+    # release info
     release_api = f"{host}/api/v4/projects/{project_id}/releases/{tag}"
     out = subprocess.check_output(
         ["curl", "-s", "-H", f"PRIVATE-TOKEN: {GITLAB_PRIVATE_TOKEN}", release_api]
@@ -145,7 +143,7 @@ def main(source_file, output_dir):
                 print(f"FAILED after {RETRIES} attempts: {line}")
                 errors.append(line)
 
-    # Write errors.json at end
+    # write errors.json at end
     if errors:
         with open("errors.json", "w") as err_file:
             json.dump({"errors": errors}, err_file, indent=4)
