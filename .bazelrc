@@ -1,0 +1,1 @@
+common --vendor_dir=/home/<path>/bazel-vendor-src
