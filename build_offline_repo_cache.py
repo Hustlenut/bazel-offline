@@ -6,9 +6,9 @@ import shutil
 from pathlib import Path
 
 # CONFIG
-PACKAGES_DIR = Path("/home/huy/workspace/bazel/bazel-offline/packages")
-BCR_DIR = Path("/home/huy/workspace/bazel/bazel-central-registry")
-OUT_DIR = Path("/home/huy/workspace/bazel/bazel-offline/offline_cache")
+PACKAGES_DIR = Path("<workspace>/bazel-offline/packages")
+BCR_DIR = Path("./bazel-central-registry")
+OUT_DIR = Path("<workspace>/bazel-offline/offline_cache")
 # ---------------------------------------------------------------------
 
 ARCHIVE_DIR = OUT_DIR / "archive" / "sha256"
